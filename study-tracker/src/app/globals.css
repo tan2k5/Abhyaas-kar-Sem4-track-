@@ -73,3 +73,31 @@ body::before {
   to   { opacity: 1; transform: translateY(0); }
 }
 .anim-fade-up { animation: fadeUp 0.4s cubic-bezier(0.22,1,0.36,1) both; }
+/* Sidebar Scroll Reset */
+.sidebar-scroll {
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+/* Custom horizontal scroll for the Timeline */
+.timeline-scroll {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  padding-bottom: 24px;
+  scroll-behavior: smooth;
+}
+
+.timeline-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.timeline-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}

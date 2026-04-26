@@ -8,116 +8,176 @@ const SLOT_META = [
   { label: 'MORNING',   color: 'var(--acc-violet)', bg: 'rgba(196, 181, 253, 0.05)', border: 'rgba(196, 181, 253, 0.2)' },
   { label: 'AFTERNOON', color: 'var(--acc-sky)',    bg: 'rgba(125, 211, 252, 0.05)', border: 'rgba(125, 211, 252, 0.2)' },
   { label: 'EVENING',   color: 'var(--acc-rose)',   bg: 'rgba(253, 164, 175, 0.05)', border: 'rgba(253, 164, 175, 0.2)' },
+  { label: 'CUSTOM',    color: '#94a3b8',           bg: 'rgba(148, 163, 184, 0.05)', border: 'rgba(148, 163, 184, 0.2)' },
 ]
 
 export default function DailyAgenda({ subjects, onUpdate }: Props) {
   const [slots, setSlots] = useState<Record<string, (AgendaSlot | null)[]>>({})
   const [editing, setEditing] = useState<{ date: string; idx: number } | null>(null)
+  const [targetDateStr, setTargetDateStr] = useState('')
+  
+  // View Modes
+  const [viewMode, setViewMode] = useState<'timeline' | 'history'>('timeline')
+  const [weekOffset, setWeekOffset] = useState(0) 
   
   // Form States
   const [formSubject, setFormSubject] = useState('')
   const [formChapter, setFormChapter] = useState('')
-  const [formTopic, setFormTopic] = useState('')
+  const [formTopic, setFormTopic] = useState('') 
+  const [customNote, setCustomNote] = useState('') 
   const [saving, setSaving] = useState(false)
 
+  useEffect(() => {
+    const saved = localStorage.getItem('study-os-target')
+    setTargetDateStr(saved || '2026-05-12')
+  }, [])
+
   const formatDateLabel = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const date = new Date(dateStr)
+    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
   }
 
-  const selectableChapters = useMemo(() => {
-    const selected = subjects.find(s => s.id === formSubject)
-    return selected ? selected.chapters : []
-  }, [formSubject, subjects])
-
-  const selectableTopics = useMemo(() => {
-    const selected = selectableChapters.find(c => c.id === formChapter)
-    return selected ? selected.topics : []
-  }, [formChapter, selectableChapters])
+  const getWeekRangeLabel = () => {
+    const start = new Date()
+    start.setDate(start.getDate() - (start.getDay() || 7) + 1 + (weekOffset * 7))
+    const end = new Date(start)
+    end.setDate(end.getDate() + 6)
+    return `${formatDateLabel(start.toISOString())} - ${formatDateLabel(end.toISOString())}`
+  }
 
   const load = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!targetDateStr) return
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
 
-    // Use local time to ensure "Today" is accurate to your timezone
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const targetDate = new Date(2026, 4, 20); // May 20, 2026 (Month is 0-indexed, so 4 is May)
-    
-    const daysArr: string[] = [];
-    let temp = new Date(today);
-    
-    // Safety check: if today is already past May 20, just show today
-    const diffTime = targetDate.getTime() - today.getTime();
-    const diffDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1);
-    
-    for(let i=0; i < diffDays; i++) {
-      // Manual YYYY-MM-DD string to avoid ISO UTC shifting issues
-      const y = temp.getFullYear();
-      const m = String(temp.getMonth() + 1).padStart(2, '0');
-      const d = String(temp.getDate()).padStart(2, '0');
-      daysArr.push(`${y}-${m}-${d}`);
+    let daysArr: string[] = []
+    const now = new Date()
+    // Midnight Start Fix: Ensures we start strictly at 00:00:00 today
+    let temp = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+    if (viewMode === 'timeline') {
+      const [ty, tm, td] = targetDateStr.split('-').map(Number)
+      const targetDate = new Date(ty, tm - 1, td)
       
-      temp.setDate(temp.getDate() + 1);
+      const diffTime = targetDate.getTime() - temp.getTime()
+      const diffDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1)
+      
+      for(let i=0; i < diffDays; i++) {
+        const y = temp.getFullYear()
+        const m = String(temp.getMonth() + 1).padStart(2, '0')
+        const d = String(temp.getDate()).padStart(2, '0')
+        daysArr.push(`${y}-${m}-${d}`)
+        temp.setDate(temp.getDate() + 1)
+      }
+    } else {
+      // HISTORY: Monday to Sunday window
+      temp.setDate(temp.getDate() - (temp.getDay() || 7) + 1 + (weekOffset * 7))
+      for(let i=0; i < 7; i++) {
+        const y = temp.getFullYear()
+        const m = String(temp.getMonth() + 1).padStart(2, '0')
+        const d = String(temp.getDate()).padStart(2, '0')
+        daysArr.push(`${y}-${m}-${d}`)
+        temp.setDate(temp.getDate() + 1)
+      }
     }
 
-    const { data } = await supabase
-      .from('agenda_slots')
-      .select('*')
-      .eq('user_id', user.id) 
-      .in('slot_date', daysArr);
+    const { data } = await supabase.from('agenda_slots').select('*').eq('user_id', user.id).in('slot_date', daysArr)
     
-    const map: Record<string, (AgendaSlot | null)[]> = {};
-    daysArr.forEach(d => { map[d] = [null, null, null] });
-    (data || []).forEach((s: any) => {
-      if (map[s.slot_date]) map[s.slot_date][s.slot_index] = s;
-    });
-    setSlots(map);
+    const newMap: Record<string, (AgendaSlot | null)[]> = {}
+    daysArr.forEach(d => { newMap[d] = [null, null, null, null] }) 
+
+    if (data) {
+      data.forEach((s: any) => {
+        if (newMap[s.slot_date]) newMap[s.slot_date][s.slot_index] = s
+      })
+    }
+    setSlots(newMap)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [targetDateStr, subjects, viewMode, weekOffset])
 
   const save = async () => {
-    if (!editing) return;
-    setSaving(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    if (!editing) return
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
 
-    if (!user) { alert("Please login"); return; }
+    const finalTopicLabel = customNote.trim() !== '' ? customNote : formTopic
 
     const { error } = await supabase.from('agenda_slots').upsert({ 
       user_id: user.id,
       slot_date: editing.date, 
       slot_index: editing.idx, 
       subject_id: formSubject || null, 
-      topic_label: formTopic || null 
-    }, { onConflict: 'user_id,slot_date,slot_index' });
+      topic_label: finalTopicLabel || null 
+    }, { onConflict: 'user_id,slot_date,slot_index' })
     
-    if (!error) { await load(); onUpdate?.(); setEditing(null); }
-    setSaving(false);
+    if (!error) { 
+      await load()
+      onUpdate?.()
+      setEditing(null)
+      setCustomNote('')
+    }
+    setSaving(false)
   }
 
-  const orderedDates = Object.keys(slots).sort();
+  const orderedDates = Object.keys(slots).sort()
 
   return (
     <div style={{ padding: '24px 0' }}>
-      <div className="custom-scrollbar" style={{ display: 'flex', gap: 20, overflowX: 'auto', paddingBottom: 24 }}>
+      <div style={headerLayout}>
+        <div>
+          <h2 style={headerTitle}>{viewMode === 'timeline' ? 'UPCOMING' : 'ARCHIVE'}</h2>
+          <div style={pillToggle}>
+             <button onClick={() => { setViewMode('timeline'); setWeekOffset(0); }} style={pillBtn(viewMode === 'timeline')}>Timeline</button>
+             <button onClick={() => setViewMode('history')} style={pillBtn(viewMode === 'history')}>History</button>
+          </div>
+        </div>
+        
+        {viewMode === 'timeline' ? (
+          <button onClick={() => {
+            const userInput = prompt("Set Target Deadline (YYYY-MM-DD):", targetDateStr)
+            if (userInput) {
+              localStorage.setItem('study-os-target', userInput)
+              setTargetDateStr(userInput)
+            }
+          }} style={smallBtnStyle}>SET TARGET</button>
+        ) : (
+          <div style={navGroup}>
+             <button onClick={() => setWeekOffset(p => p - 1)} style={arrowBtn}>←</button>
+             <span style={weekRangeTxt}>{getWeekRangeLabel()}</span>
+             <button onClick={() => setWeekOffset(p => p + 1)} style={arrowBtn}>→</button>
+          </div>
+        )}
+      </div>
+
+      <div className="custom-scrollbar" style={timelineWrapper}>
         {orderedDates.map((ds) => (
-          <div key={ds} style={{ minWidth: 260, background: 'var(--surface)', borderRadius: 28, border: '1px solid var(--border)', overflow: 'hidden' }}>
-            <div style={{ padding: '20px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ fontWeight: 800, color: 'var(--text)', fontSize: 14 }}>
+          <div key={ds} style={dayCard}>
+            <div style={dayHeader}>
+              <div style={dateText}>
                 {ds === new Date().toISOString().split('T')[0] ? `✨ TODAY (${formatDateLabel(ds)})` : formatDateLabel(ds)}
               </div>
             </div>
-            <div style={{ padding: '16px', display: 'grid', gap: 12 }}>
+            <div style={{ padding: '20px', display: 'grid', gap: 12 }}>
               {SLOT_META.map((sm, idx) => {
-                const slot = slots[ds][idx];
-                const subj = subjects.find(s => s.id === slot?.subject_id);
+                const slot = slots[ds]?.[idx]
+                const subj = subjects.find(s => s.id === slot?.subject_id)
                 return (
-                  <div key={idx} onClick={() => { setEditing({ date: ds, idx }); setFormSubject(slot?.subject_id || ''); setFormChapter(''); setFormTopic(slot?.topic_label || ''); }}
-                    style={{ padding: '16px', borderRadius: 20, cursor: 'pointer', background: slot ? `${subj?.color}10` : sm.bg, border: `1px solid ${slot ? subj?.color : sm.border}` }}>
-                    <div className="label-caps" style={{ fontSize: 9, color: slot ? subj?.color : sm.color, marginBottom: 6 }}>{sm.label}</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{slot ? subj?.name : '+ SCHEDULE'}</div>
-                    {slot?.topic_label && <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>{slot.topic_label}</div>}
+                  <div key={idx} onClick={() => { 
+                    setEditing({ date: ds, idx })
+                    setFormSubject(slot?.subject_id || '')
+                    setFormTopic(slot?.topic_label || '')
+                    setCustomNote(slot?.topic_label || '')
+                  }}
+                    style={{ 
+                      padding: '16px', borderRadius: 22, cursor: 'pointer', 
+                      background: slot ? `${subj?.color || '#ffffff'}10` : sm.bg, 
+                      border: `1px solid ${slot ? (subj?.color || sm.border) : sm.border}` 
+                    }}>
+                    <div className="label-caps" style={{ fontSize: 9, color: slot ? (subj?.color || sm.color) : sm.color, marginBottom: 6, fontWeight: 900 }}>{sm.label}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>{slot ? (subj?.name || "CUSTOM") : '+ SCHEDULE'}</div>
+                    {slot?.topic_label && <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4, color: 'white' }}>{slot.topic_label}</div>}
                   </div>
                 )
               })}
@@ -127,27 +187,20 @@ export default function DailyAgenda({ subjects, onUpdate }: Props) {
       </div>
 
       {editing && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(5,14,18,0.9)', backdropFilter: 'blur(10px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--surface2)', padding: 40, borderRadius: 32, width: '100%', maxWidth: 440, border: '1px solid var(--border)' }}>
-            <h3 style={{ fontSize: 24, fontWeight: 800, marginBottom: 20 }}>Schedule Session</h3>
-            <div style={{ display: 'grid', gap: 20, marginBottom: 30 }}>
-              <select value={formSubject} onChange={e => {setFormSubject(e.target.value); setFormChapter(''); setFormTopic('')}} style={inputStyle}>
-                <option value="">Select Subject</option>
+        <div style={modalOverlay}>
+          <div style={modalCard}>
+            <h3 style={{ fontSize: 24, fontWeight: 900, marginBottom: 24 }}>Plan Session</h3>
+            <div style={{ display: 'grid', gap: 16, marginBottom: 32 }}>
+              <select value={formSubject} onChange={e => setFormSubject(e.target.value)} style={inputStyle as any}>
+                <option value="">Subject</option>
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
-              <select value={formChapter} onChange={e => {setFormChapter(e.target.value); setFormTopic('')}} disabled={!formSubject} style={inputStyle}>
-                <option value="">Select Chapter</option>
-                {selectableChapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <select value={formTopic} onChange={e => setFormTopic(e.target.value)} disabled={!formChapter} style={inputStyle}>
-                <option value="">Select Topic</option>
-                {selectableTopics.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
-              </select>
+              <textarea placeholder="Specific topic or task..." value={customNote} onChange={e => setCustomNote(e.target.value)} style={inputStyle as any} />
             </div>
             <div style={{ display: 'flex', gap: 12 }}>
-              <button onClick={() => setEditing(null)} style={{ flex: 1, padding: 15, background: 'transparent', border: '1px solid var(--border)', color: 'white', borderRadius: 12 }}>Cancel</button>
-              <button onClick={save} disabled={saving} style={{ flex: 2, padding: 15, background: 'var(--acc-violet)', border: 'none', color: 'black', fontWeight: 800, borderRadius: 12 }}>
-                {saving ? 'Saving...' : 'Confirm'}
+              <button onClick={() => setEditing(null)} style={cancelBtn}>Cancel</button>
+              <button onClick={save} disabled={saving} style={confirmBtn}>
+                {saving ? 'SAVING...' : 'CONFIRM'}
               </button>
             </div>
           </div>
@@ -157,4 +210,24 @@ export default function DailyAgenda({ subjects, onUpdate }: Props) {
   )
 }
 
-const inputStyle = { width: '100%', padding: '14px', borderRadius: '12px', background: 'var(--bg)', border: '1px solid var(--border)', color: 'white' };
+// --- Style Objects ---
+const pillToggle = { display: 'flex', gap: 4, background: 'rgba(255,255,255,0.05)', padding: 4, borderRadius: 100, marginTop: 12, width: 'fit-content' };
+const pillBtn = (active: boolean): React.CSSProperties => ({
+  padding: '6px 16px', border: 'none', borderRadius: 100, fontSize: 10, fontWeight: 900, cursor: 'pointer',
+  background: active ? 'white' : 'transparent', color: active ? 'black' : 'rgba(255,255,255,0.4)', transition: '0.2s'
+});
+const navGroup = { display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(255,255,255,0.03)', padding: '8px 16px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.05)' };
+const weekRangeTxt = { fontSize: 10, fontWeight: 900, color: '#8b5cf6', letterSpacing: 1 };
+const arrowBtn = { background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: 16, opacity: 0.6 };
+const headerLayout: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24 };
+const headerTitle: React.CSSProperties = { margin: 0, fontWeight: 900, fontSize: 32, color: 'white' };
+const timelineWrapper: React.CSSProperties = { display: 'flex', gap: 20, overflowX: 'auto', paddingBottom: 24 };
+const dayCard: React.CSSProperties = { minWidth: 280, background: 'rgba(255,255,255,0.02)', borderRadius: 32, border: '1px solid rgba(255,255,255,0.05)', overflow: 'hidden' };
+const dayHeader: React.CSSProperties = { padding: '24px', borderBottom: '1px solid rgba(255,255,255,0.05)' };
+const dateText: React.CSSProperties = { fontWeight: 800, color: 'white', fontSize: 14 };
+const inputStyle = { width: '100%', padding: '16px', borderRadius: '16px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', outline: 'none', minHeight: 60 };
+const smallBtnStyle: React.CSSProperties = { padding: '10px 18px', background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.2)', color: '#8b5cf6', borderRadius: '12px', fontSize: '10px', fontWeight: 900, cursor: 'pointer', letterSpacing: 1 };
+const modalOverlay: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const modalCard: React.CSSProperties = { background: '#0a0a0a', padding: '40px', borderRadius: '40px', width: '100%', maxWidth: 460, border: '1px solid rgba(255,255,255,0.1)' };
+const confirmBtn: React.CSSProperties = { flex: 2, padding: 18, background: 'white', border: 'none', color: 'black', fontWeight: 900, borderRadius: 16, cursor: 'pointer' };
+const cancelBtn: React.CSSProperties = { flex: 1, padding: 18, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'white', borderRadius: 16, cursor: 'pointer' };

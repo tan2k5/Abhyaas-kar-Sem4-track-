@@ -9,6 +9,9 @@ export default function Home() {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null)
   const [loading, setLoading] = useState(true)
+  
+  // NEW: State to manage sidebar expansion
+  const [isExpanded, setIsExpanded] = useState(false)
 
   const refreshData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -63,17 +66,30 @@ export default function Home() {
 
   return (
     <main style={mainContainer}>
-      {/* SIDEBAR - Kept separate from main scroll */}
+      {/* SIDEBAR - Now takes isExpanded and onToggle props */}
       <Sidebar 
         subjects={subjects} 
         onSelectSubject={(s: Subject) => setSelectedSubject(s)} 
+        isExpanded={isExpanded}
+        onToggle={() => setIsExpanded(!isExpanded)}
       />
 
-      <div className="custom-scrollbar" style={contentWrapper}>
+      {/* CONTENT WRAPPER - Margin now reacts to isExpanded */}
+      <div 
+        className="custom-scrollbar" 
+        style={{
+          ...contentWrapper,
+          marginLeft: isExpanded ? '280px' : '70px',
+          width: isExpanded ? 'calc(100vw - 280px)' : 'calc(100vw - 70px)'
+        }}
+      >
         {/* Header */}
         <header style={headerStyle}>
-          <h1 className="font-display" style={{ fontSize: 24, fontWeight: 900 }}>DASHBOARD</h1>
-          <p className="label-caps" style={{ fontSize: 9, opacity: 0.5 }}>Tan is the best</p>
+          <div>
+            <h1 className="font-display" style={{ fontSize: 32, fontWeight: 900, letterSpacing: '-1px' }}>DASHBOARD</h1>
+            <p className="label-caps" style={{ fontSize: 9, opacity: 0.5, letterSpacing: '2px' }}>System Active / Tanushree</p>
+          </div>
+          <div style={badgeStyle}>LIVE SESSION</div>
         </header>
         
         {/* Stats Grid */}
@@ -84,8 +100,9 @@ export default function Home() {
             const pct = allT.length ? Math.round((done / allT.length) * 100) : 0
             return (
               <div key={s.id} style={{ ...statCard, borderLeft: `4px solid ${s.color}` }}>
-                <p className="label-caps" style={{ fontSize: 10, opacity: 0.6 }}>{s.short_name}</p>
+                <p className="label-caps" style={{ fontSize: 10, opacity: 0.6, marginBottom: 8 }}>{s.short_name}</p>
                 <h2 style={{ fontSize: 28, fontWeight: 900 }}>{pct}%</h2>
+                <div style={progressBar(s.color, pct)} />
               </div>
             )
           })}
@@ -94,28 +111,34 @@ export default function Home() {
         {/* Progress Section */}
         <div style={twoColGrid}>
           <div style={panelCard}>
-            <h3 className="label-caps" style={{ color: 'var(--acc-amber)', marginBottom: 20 }}>◑ In Progress</h3>
-            {inProgressTopics.slice(0, 4).map((t, i) => (
-              <div key={i} style={rowItem}>
-                <span style={{ fontWeight: 700 }}>{t.name}</span>
-                <span style={{ fontSize: 9, color: t.color, fontWeight: 900 }}>{t.subjectName}</span>
-              </div>
-            ))}
+            <h3 className="label-caps" style={{ color: 'var(--acc-amber)', marginBottom: 24, fontSize: 11 }}>◑ In Progress</h3>
+            <div style={{ display: 'grid', gap: 12 }}>
+              {inProgressTopics.slice(0, 4).map((t, i) => (
+                <div key={i} style={rowItem}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{t.name}</span>
+                  <span style={{ fontSize: 9, color: t.color, fontWeight: 900, background: `${t.color}15`, padding: '4px 8px', borderRadius: 6 }}>{t.subjectName}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div style={panelCard}>
-            <h3 className="label-caps" style={{ color: 'var(--acc-green)', marginBottom: 20 }}>● Completed</h3>
-            {finishedChapters.slice(0, 4).map((c, i) => (
-              <div key={i} style={rowItem}>
-                <span style={{ fontWeight: 700, color: 'var(--acc-green)' }}>{c.name}</span>
-                <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 900 }}>{c.subjectName}</span>
-              </div>
-            ))}
+            <h3 className="label-caps" style={{ color: 'var(--acc-green)', marginBottom: 24, fontSize: 11 }}>● Completed</h3>
+            <div style={{ display: 'grid', gap: 12 }}>
+              {finishedChapters.slice(0, 4).map((c, i) => (
+                <div key={i} style={rowItem}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--acc-green)' }}>{c.name}</span>
+                  <span style={{ fontSize: 9, opacity: 0.5, fontWeight: 900 }}>{c.subjectName}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Daily Agenda till May 20 */}
-        <DailyAgenda subjects={subjects} onUpdate={refreshData} />
+        {/* Daily Agenda */}
+        <div style={{ marginTop: 40 }}>
+           <DailyAgenda subjects={subjects} onUpdate={refreshData} />
+        </div>
       </div>
 
       {selectedSubject && (
@@ -129,12 +152,85 @@ export default function Home() {
   )
 }
 
-// Styles
-const mainContainer: React.CSSProperties = { display: 'flex', height: '100vh', width: '100vw', background: 'var(--bg)', overflow: 'hidden' };
-const contentWrapper: React.CSSProperties = { flex: 1, padding: '40px 60px 150px', overflowY: 'auto' };
-const headerStyle = { marginBottom: 48, display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
-const statsGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 20, marginBottom: 40 };
-const statCard = { padding: 24, background: 'rgba(255,255,255,0.02)', borderRadius: 20, border: '1px solid var(--border)' };
-const twoColGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 40 };
-const panelCard = { padding: 32, background: 'var(--surface)', borderRadius: 28, border: '1px solid var(--border)' };
-const rowItem = { display: 'flex', justifyContent: 'space-between', padding: '14px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' };
+// --- Enhanced Styles ---
+const mainContainer: React.CSSProperties = { 
+  display: 'flex', 
+  height: '100vh', 
+  width: '100vw', 
+  background: 'var(--bg)', 
+  overflow: 'hidden' 
+};
+
+const contentWrapper: React.CSSProperties = { 
+  flex: 1, 
+  padding: '60px 80px 150px', 
+  overflowY: 'auto',
+  transition: 'margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+};
+
+const headerStyle = { 
+  marginBottom: 60, 
+  display: 'flex', 
+  justifyContent: 'space-between', 
+  alignItems: 'flex-start' 
+};
+
+const badgeStyle = {
+  padding: '8px 16px',
+  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(255,255,255,0.1)',
+  borderRadius: '100px',
+  fontSize: 10,
+  fontWeight: 900,
+  letterSpacing: 1,
+  color: 'var(--acc-violet)'
+};
+
+const statsGrid = { 
+  display: 'grid', 
+  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+  gap: 24, 
+  marginBottom: 60 
+};
+
+const statCard = { 
+  padding: '30px', 
+  background: 'rgba(255,255,255,0.02)', 
+  borderRadius: '24px', 
+  border: '1px solid var(--border)',
+  position: 'relative' as const,
+  overflow: 'hidden' as const
+};
+
+const progressBar = (color: string, pct: number) => ({
+  position: 'absolute' as const,
+  bottom: 0,
+  left: 0,
+  height: '3px',
+  width: `${pct}%`,
+  background: color,
+  boxShadow: `0 0 10px ${color}`
+});
+
+const twoColGrid = { 
+  display: 'grid', 
+  gridTemplateColumns: '1fr 1fr', 
+  gap: 32, 
+  marginBottom: 60 
+};
+
+const panelCard = { 
+  padding: '40px', 
+  background: 'rgba(255,255,255,0.01)', 
+  borderRadius: '32px', 
+  border: '1px solid var(--border)',
+  backdropFilter: 'blur(10px)'
+};
+
+const rowItem = { 
+  display: 'flex', 
+  justifyContent: 'space-between', 
+  alignItems: 'center',
+  padding: '16px 0', 
+  borderBottom: '1px solid rgba(255,255,255,0.03)' 
+};
